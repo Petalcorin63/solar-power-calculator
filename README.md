@@ -63,8 +63,9 @@ Security measures:
 - Optional Cloudflare Turnstile ("verify you are human") on sign-in and sign-up.
   It's checked before any account lookup or password hashing, so bots that can't
   pass it cost almost nothing.
-- Sign-in is rate-limited per address and email (5 per 15 min) and per address
-  (10 per hour); sign-up is limited to 5 per address per hour. IPv6 clients
+- Failed sign-ins are rate-limited per address and email (5 per 15 min) and per
+  address (10 per hour); successful ones don't count, so people sharing an IP
+  aren't locked out. Sign-up is limited to 5 per address per hour. IPv6 clients
   are grouped by /64. The counters live in the database, so every server
   instance (each Vercel function instance) shares them, and over-limit requests
   are rejected before any password hashing.
@@ -116,13 +117,16 @@ Vite builds the frontend, which Vercel serves from its CDN. `api/index.ts` runs
 the Fastify app as a single Vercel Function for every `/api/*` request.
 `vercel.json` sets this up and adds the security headers to the page.
 
-1. **Create the database.** In the Vercel dashboard, add Turso from
+1. **Vercel installs pnpm itself.** The lockfile is from pnpm 12, which Vercel's
+   built-in pnpm (9/10) can't read, so `vercel.json`'s install command installs
+   Corepack and runs the pinned pnpm version. Check the build log shows pnpm 12.
+2. **Create the database.** In the Vercel dashboard, add Turso from
    Storage → Marketplace and connect it to the project. The app reads
    `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN`. If the integration names them
    differently, add those two variables yourself. The tables are created on
    the first request. Without a database URL, the function refuses to start
    rather than losing data.
-2. **Set up Turnstile** (free; needs a Cloudflare account). In the Cloudflare
+3. **Set up Turnstile** (free; needs a Cloudflare account). In the Cloudflare
    dashboard, go to Turnstile → Add widget and add your Vercel domain(s). Then
    set two environment variables in Vercel:
    - `VITE_TURNSTILE_SITE_KEY`: the site key, built into the frontend
@@ -131,17 +135,18 @@ the Fastify app as a single Vercel Function for every `/api/*` request.
    Set both or neither. With only the secret, nobody can sign in; with only the
    site key, the widget shows but nothing checks it. Without them, the app
    works but sign-in has no bot check, and the function logs a warning.
-3. **Import the repository** at vercel.com/new. Leave the build settings alone;
+4. **Import the repository** at vercel.com/new. Leave the build settings alone;
    `vercel.json` provides them.
-4. **Add a firewall rate-limit rule** (Firewall → Configure → New Rule). The
+5. **Add a firewall rate-limit rule** (Firewall → Configure → New Rule). The
    free plan allows one, so use it for all API traffic:
-   - If **Request Path** starts with `/api/`
+   - If **Request Path** starts with `/api` (no trailing slash: the function is
+     also reachable at `/api` itself, e.g. `/api?path=auth/login`)
    - **Rate limit**: 60 requests per 60 seconds, counted by IP, action
      *Deny* (429)
 
    Normal use stays well under that: auto-save sends at most one request per
    second while typing. Blocked requests don't count toward your usage.
-5. **Deploy and test a preview:** sign up, save a project, reload, and sign
+6. **Deploy and test a preview:** sign up, save a project, reload, and sign
    in from a private window.
 
 Vercel's automatic DDoS protection is on for every plan. During an attack you

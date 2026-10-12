@@ -12,6 +12,7 @@ import {
   hashPassword,
   hitRateLimit,
   needsRehash,
+  refundRateLimit,
   userForSession,
   verifyPassword,
   type RateLimit,
@@ -240,10 +241,15 @@ export async function buildApp(options: AppOptions) {
 
   app.post<{ Body: Credentials }>('/api/auth/login', { schema: { body: credentialsSchema } }, async (request, reply) => {
     const email = normalizeEmail(request.body.email)
-    const address = clientKey(request.ip)
-    if (!await hitRateLimit(db, `login:${address}`, LOGIN_PER_ADDRESS)
-      || !await hitRateLimit(db, `login:${address}|${email}`, LOGIN_PER_ACCOUNT)) {
-      return reply.code(429).send({ error: 'Too many sign-in attempts — try again later' })
+    const addressKey = `login:${clientKey(request.ip)}`
+    const accountKey = `${addressKey}|${email}`
+    const tooMany = { error: 'Too many failed sign-in attempts — try again later' }
+    if (!await hitRateLimit(db, addressKey, LOGIN_PER_ADDRESS)) return reply.code(429).send(tooMany)
+    if (!await hitRateLimit(db, accountKey, LOGIN_PER_ACCOUNT)) {
+      // Retrying one locked account shouldn't use up the budget of everyone else
+      // sharing this address (mobile carriers, schools and offices share IPs).
+      await refundRateLimit(db, addressKey)
+      return reply.code(429).send(tooMany)
     }
     if (!await isHuman(request)) return reply.code(400).send(notVerified)
 
@@ -254,6 +260,9 @@ export async function buildApp(options: AppOptions) {
     if (!user || !ok) {
       return reply.code(401).send({ error: 'Incorrect email or password' })
     }
+
+    // Only failed attempts count toward the limits.
+    await Promise.all([refundRateLimit(db, addressKey), refundRateLimit(db, accountKey)])
 
     if (needsRehash(user.passwordHash)) {
       await db.run('UPDATE users SET password_hash = ? WHERE id = ?', await hashPassword(request.body.password), user.id)
@@ -279,16 +288,16 @@ export async function buildApp(options: AppOptions) {
     return json
   }
 
-  /** Rejects a write that would take the user's saved projects past their storage quota. */
-  async function checkStorage(userId: number, newBytes: number, replacingProjectId?: number) {
-    const row = await db.get<{ bytes: number }>(`
-      SELECT COALESCE(SUM(length(CAST(data AS BLOB))), 0) AS bytes FROM projects
-      WHERE user_id = ? AND id IS NOT ?
-    `, userId, replacingProjectId ?? null)
-    if ((row?.bytes ?? 0) + newBytes > quotas.maxStorageBytesPerUser) {
-      throw new HttpError(413, 'Your saved projects have reached the storage limit — delete some first')
-    }
-  }
+  /**
+   * SQL condition: the user's other projects plus the new data fit the storage quota.
+   * Used inside the INSERT/UPDATE itself, so concurrent saves can't each pass a
+   * separate check and overshoot it together. Args: user id, project id being
+   * replaced (or null), new data size in bytes, quota.
+   */
+  const FITS_STORAGE_QUOTA = `
+    (SELECT COALESCE(SUM(length(CAST(data AS BLOB))), 0) FROM projects
+     WHERE user_id = ? AND id IS NOT ?) + ? <= ?`
+  const storageFull = { error: 'Your saved projects have reached the storage limit — delete some first' }
 
   async function getProject(id: number, userId: number) {
     const row = await db.get<ProjectRow>(`
@@ -318,15 +327,21 @@ export async function buildApp(options: AppOptions) {
   }, async (request, reply) => {
     const userId = request.user!.id
     const data = serializeData(request.body.data)
-    await checkStorage(userId, Buffer.byteLength(data))
 
-    // The count check is part of the INSERT so concurrent saves can't overshoot it.
+    // Both quota checks are part of the INSERT so concurrent saves can't overshoot them.
     const result = await db.run(`
       INSERT INTO projects (user_id, name, data)
-      SELECT ?, ?, ? WHERE (SELECT COUNT(*) FROM projects WHERE user_id = ?) < ?
-    `, userId, request.body.name.trim() || 'Untitled', data, userId, quotas.maxProjectsPerUser)
+      SELECT ?, ?, ?
+      WHERE (SELECT COUNT(*) FROM projects WHERE user_id = ?) < ?
+        AND ${FITS_STORAGE_QUOTA}
+    `, userId, request.body.name.trim() || 'Untitled', data,
+      userId, quotas.maxProjectsPerUser,
+      userId, null, Buffer.byteLength(data), quotas.maxStorageBytesPerUser)
     if (result.changes === 0) {
-      return reply.code(409).send({ error: `You can save up to ${quotas.maxProjectsPerUser} projects — delete one first` })
+      const row = await db.get<{ count: number }>('SELECT COUNT(*) AS count FROM projects WHERE user_id = ?', userId)
+      return (row?.count ?? 0) >= quotas.maxProjectsPerUser
+        ? reply.code(409).send({ error: `You can save up to ${quotas.maxProjectsPerUser} projects — delete one first` })
+        : reply.code(413).send(storageFull)
     }
     return reply.code(201).send(await getProject(result.lastInsertRowid, userId))
   })
@@ -356,15 +371,18 @@ export async function buildApp(options: AppOptions) {
 
     const name = request.body.name?.trim()
     const data = request.body.data === undefined ? undefined : serializeData(request.body.data)
-    if (data !== undefined) await checkStorage(userId, Buffer.byteLength(data), id)
 
-    await db.run(`
+    // A rename (no new data) always fits; new data must fit alongside the user's other projects.
+    const result = await db.run(`
       UPDATE projects SET
         name = COALESCE(?, name),
         data = COALESCE(?, data),
         updated_at = datetime('now')
       WHERE id = ? AND user_id = ?
-    `, name || null, data ?? null, id, userId)
+        AND (? IS NULL OR ${FITS_STORAGE_QUOTA})
+    `, name || null, data ?? null, id, userId,
+      data ?? null, userId, id, Buffer.byteLength(data ?? ''), quotas.maxStorageBytesPerUser)
+    if (result.changes === 0) return reply.code(413).send(storageFull)
     return getProject(id, userId)
   })
 

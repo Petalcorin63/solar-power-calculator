@@ -342,3 +342,64 @@ describe('human verification (Turnstile)', () => {
     expect(res.statusCode).toBe(201)
   })
 })
+
+describe('login limits count only failures', () => {
+  const login = (target: App, email: string, password: string) => target.inject({
+    method: 'POST', url: '/api/auth/login', headers, payload: { email, password },
+  })
+
+  it('lets people sharing one address sign in repeatedly', async () => {
+    // Per-account limit is 5 and per-address 10: 12 successful sign-ins exceed both.
+    await register('shared@example.com', 'correct horse')
+    const codes = []
+    for (let i = 0; i < 12; i++) codes.push((await login(app, 'shared@example.com', 'correct horse')).statusCode)
+    expect(codes.every(c => c === 200)).toBe(true)
+  }, HASH_HEAVY_TIMEOUT)
+
+  it('still blocks after 5 failures, even for the right password', async () => {
+    await register('a@example.com', 'correct horse')
+    for (let i = 0; i < 5; i++) expect((await login(app, 'a@example.com', 'wrong password')).statusCode).toBe(401)
+    expect((await login(app, 'a@example.com', 'correct horse')).statusCode).toBe(429)
+  }, HASH_HEAVY_TIMEOUT)
+
+  it("doesn't let retries on one locked account use up the address's budget", async () => {
+    await register('locked@example.com', 'correct horse')
+    await register('other@example.com', 'correct horse')
+    for (let i = 0; i < 5; i++) await login(app, 'locked@example.com', 'wrong password')
+    // 20 retries against the locked account are refused without hashing...
+    for (let i = 0; i < 20; i++) expect((await login(app, 'locked@example.com', 'wrong password')).statusCode).toBe(429)
+    // ...and someone else on the same address can still sign in.
+    expect((await login(app, 'other@example.com', 'correct horse')).statusCode).toBe(200)
+  }, HASH_HEAVY_TIMEOUT)
+})
+
+describe('storage quota is enforced by the write itself', () => {
+  async function signedIn(quotas: { maxProjectsPerUser?: number, maxStorageBytesPerUser?: number }) {
+    const target = await buildApp({ db: await openDb({ url: ':memory:' }), secureCookies: false, quotas })
+    const res = await target.inject({
+      method: 'POST', url: '/api/auth/register', headers, payload: { email: 's@example.com', password: 'correct horse' },
+    })
+    const cookie = `session=${res.cookies.find(c => c.name === 'session')!.value}`
+    return (method: 'POST' | 'PUT', url: string, payload: object) =>
+      target.inject({ method, url, headers: { ...headers, cookie }, payload })
+  }
+
+  it('reports a full quota as 413 and a full project count as 409', async () => {
+    const bySize = await signedIn({ maxStorageBytesPerUser: 1000 })
+    expect((await bySize('POST', '/api/projects', { name: 'a', data: { blob: 'x'.repeat(600) } })).statusCode).toBe(201)
+    const full = await bySize('POST', '/api/projects', { name: 'b', data: { blob: 'x'.repeat(600) } })
+    expect(full.statusCode).toBe(413)
+    expect(full.json().error).toMatch(/storage limit/)
+
+    const byCount = await signedIn({ maxProjectsPerUser: 1 })
+    expect((await byCount('POST', '/api/projects', { name: 'a', data: {} })).statusCode).toBe(201)
+    expect((await byCount('POST', '/api/projects', { name: 'b', data: {} })).statusCode).toBe(409)
+  })
+
+  it('still allows renaming when the quota is full, but not growing a project past it', async () => {
+    const write = await signedIn({ maxStorageBytesPerUser: 1000 })
+    const { id } = (await write('POST', '/api/projects', { name: 'a', data: { blob: 'x'.repeat(900) } })).json()
+    expect((await write('PUT', `/api/projects/${id}`, { name: 'renamed' })).json().name).toBe('renamed')
+    expect((await write('PUT', `/api/projects/${id}`, { data: { blob: 'x'.repeat(1200) } })).statusCode).toBe(413)
+  })
+})

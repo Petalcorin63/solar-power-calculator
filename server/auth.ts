@@ -170,3 +170,12 @@ export async function hitRateLimit(db: Db, key: string, { limit, windowMs }: Rat
   `, key, now + windowMs, now, now)
   return row !== undefined && row.count <= limit
 }
+
+/**
+ * Gives back one hit, for attempts that turn out to be legitimate (a successful
+ * sign-in). Counting happens up front so concurrent attempts can't all slip past the
+ * limit before any is recorded; refunding afterwards means only failures use it up.
+ */
+export async function refundRateLimit(db: Db, key: string): Promise<void> {
+  await db.run('UPDATE rate_limits SET count = MAX(count - 1, 0) WHERE key = ?', key)
+}
