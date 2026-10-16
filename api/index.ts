@@ -1,9 +1,9 @@
 // Vercel Function serving every /api/* request (vercel.json rewrites them here). The
 // built frontend is served by Vercel's CDN, not by this function.
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import { buildApp } from '../server/app.js'
-import { appOptionsFrom, loadConfig } from '../server/config.js'
-import { originalUrl } from '../server/original-url.js'
+import { buildApp } from '../server/app/index.js'
+import { appOptionsFrom, loadConfig } from '../server/config/index.js'
+import { originalUrl } from '../server/http/index.js'
 
 // Built once per function instance and reused across requests (and, with Fluid
 // compute, across concurrent requests).
@@ -17,7 +17,7 @@ const appPromise = (async () => {
   return app
 })()
 
-export default async function handler(req: IncomingMessage, res: ServerResponse) {
+export default async function handler(req: IncomingMessage, res: ServerResponse): Promise<void> {
   const app = await appPromise
   req.url = originalUrl(req.url ?? '/')
   app.server.emit('request', req, res)

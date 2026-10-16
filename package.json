@@ -8,6 +8,8 @@
     "build": "vue-tsc -b && vite build",
     "preview": "vite preview",
     "test": "vitest run",
+    "lint": "eslint .",
+    "check": "vue-tsc -b && eslint . && vitest run",
     "dev:server": "tsx watch server/index.ts",
     "start": "tsx server/index.ts --production"
   },
@@ -20,13 +22,19 @@
     "vue": "^3.5.18"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@tailwindcss/vite": "^4.1.11",
     "@types/node": "^22.20.4",
     "@vitejs/plugin-vue": "^5.2.1",
+    "eslint": "^10.12.0",
+    "eslint-plugin-vue": "^10.11.1",
+    "globals": "^17.13.0",
     "tailwindcss": "^4.1.11",
     "typescript": "^5.7.3",
+    "typescript-eslint": "^8.71.2",
     "vite": "^6.0.11",
     "vitest": "^3.2.7",
+    "vue-eslint-parser": "^10.4.1",
     "vue-tsc": "^3.3.9"
   },
   "packageManager": "pnpm@12.8.1+sha512.f64ba907507f5ceafe06c8d38e6052d0179444580ec1279ddd5bfc11cb48aa8a2644b66598e07e761da84872a9fc57d5f902b87fa49d024198d558612aabbe45"

@@ -8,14 +8,52 @@ types:
   array size, battery bank, charge controller rating, and inverter rating.
 - **Grid-tied** — enter your annual usage and an offset target, and get an
   array size, grid-tie inverter rating, and estimated annual production.
-- **Hybrid** — grid-tied sizing plus a backup battery and inverter sized to a
-  separate list of critical loads.
+- **Hybrid** — solar plus the grid, with a backup battery and inverter sized to a
+  separate list of critical loads. Works with a grid-interactive hybrid inverter
+  (sized to your yearly use) or an all-in-one inverter on grid input (sized to the
+  critical loads, since it can't export).
 
 Panels come in whole units, so the installed array (panel count × panel
 wattage) is usually larger than the calculated minimum. The charge controller,
 grid-tie inverter, and production estimate are all sized to the installed
 array. Battery counts account for wiring lower-voltage units in series to reach
 the system voltage.
+
+Below the results, an interactive **system diagram** draws the chosen system:
+panels, charge controller, batteries, inverter, loads, and the wires and breakers
+between them. Click any part to see the computation behind its size with your
+numbers substituted in, and to edit the inputs it depends on. Breakers are sized
+from the circuit current. Wires also need the panel datasheet values (Voc, Vmp,
+Isc) and each run's one-way length. These start blank, and the diagram asks for
+them before showing a wire size. Wire sizes are the larger of the size the breaker
+may protect and the size that keeps voltage drop under the limit (3% by default),
+using copper with no derating for heat or bundling.
+
+Off-grid systems can use separate equipment (an MPPT charge controller plus an
+inverter) or an all-in-one inverter with the charge controller and a battery
+charger built in, like PowMr or MPP Solar units. The all-in-one drawing has no
+separate controller. Its battery cable is sized for whichever is larger: the
+inverter's draw, or solar plus AC charging. An optional grid or generator AC input
+is sized for the loads passed through plus the charger.
+
+Hybrid systems can likewise use a grid-interactive hybrid inverter that exports
+surplus solar, or an all-in-one inverter fed from the grid on its AC input. The
+all-in-one can't export, so its panels are sized to the critical loads on its
+output rather than the whole bill, the grid only supplies power, and the main
+breaker box feeds the unit's AC input. Red dots mark every part
+and field that still needs information from you.
+
+A location selector on the diagram picks whose rules and tables size wires and
+breakers, and sets the AC voltage options:
+
+| Location | Wire sizes | Basis |
+| --- | --- | --- |
+| United States | AWG | NEC 2026: Table 310.16 (75 °C), 1.25 × 1.25 on PV current, 125% on continuous loads |
+| Philippines | mm² (2.0, 3.5, 5.5 …) | PEC 2017, which follows the NEC rules; ratings from a secondary source |
+| Europe / IEC | mm² | IEC 60364-5-52 Table B.52.2 (PVC, method C); no extra 125% margin; PV at 1.25 × Isc |
+| Australia / NZ | mm² | AS/NZS 3008.1.2 Table 3.7 (NZ, 30 °C); AS/NZS 5033 PV current 1.25 × Isc |
+
+Each table's source is listed in `src/lib/references/data/sources.ts` and cited in the app.
 
 Signing in is optional. With an account, the current inputs auto-save as you
 edit and come back on your next visit, and you can keep up to 200 named
@@ -35,15 +73,21 @@ results.
 
 The sources behind each formula and default are cited in the app's "Formulas &
 references" panel. Each entry gives its publication or revision date and when it
-was last checked; the list lives in `src/lib/references.ts` and was last
-reviewed on 4 October 2026. When you re-check the sources, update `accessed`
+was last checked; the list lives in `src/lib/references/data/sources.ts` and was last
+reviewed on 16 October 2026. When you re-check the sources, update `accessed`
 and `REFERENCES_REVIEWED` there. A test makes sure every citation in the panel
 points to a listed source and every source is cited.
 
 ## Stack
 
 Vue 3 + TypeScript + Tailwind CSS v4, built with Vite. The sizing math lives in
-`src/lib/solar.ts` as pure functions, tested with Vitest.
+`src/lib/sizing/` (equipment) and `src/lib/wiring/` (wires and breakers) as pure
+functions, and `src/lib/diagram/` turns them into the diagram's step-by-step
+explanations. All of it is tested with Vitest.
+
+[ARCHITECTURE.md](ARCHITECTURE.md) maps the code (frontend, diagram, server
+request flow, database) and lists where to make common changes.
+[CONTRIBUTING.md](CONTRIBUTING.md) has the coding rules and the checks to run.
 
 Accounts and saved projects use a small Fastify server in `server/`, storing
 data with [libSQL](https://github.com/tursodatabase/libsql) (SQLite). Locally
@@ -105,11 +149,16 @@ pnpm dev          # frontend on http://localhost:5173
 
 The calculator works without the server; only sign-in and saving need it.
 
-## Test
+## Checks
 
 ```sh
-pnpm test
+pnpm check   # type-check, lint and all tests — run before calling a change done
+pnpm test    # tests only
+pnpm lint    # ESLint only
 ```
+
+The type-check is strict (`noUncheckedIndexedAccess` among others), and ESLint runs
+typescript-eslint's strict, type-aware rules plus Vue's correctness rules.
 
 ## Deploying to Vercel
 
