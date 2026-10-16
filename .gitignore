@@ -6,3 +6,6 @@ dist-ssr
 .DS_Store
 /data/
 .vercel
+# Playwright output
+/test-results/
+/playwright-report/

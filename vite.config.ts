@@ -16,5 +16,7 @@ export default defineConfig({
     // The server tests hash passwords with scrypt (~0.5 s and 128 MB each). Run in
     // parallel, they can starve otherwise-quick tests past Vitest's 5 s default.
     testTimeout: 30_000,
+    // e2e/ holds the Playwright browser tests (`pnpm test:e2e`), not Vitest ones.
+    exclude: ['**/node_modules/**', 'e2e/**'],
   },
 })

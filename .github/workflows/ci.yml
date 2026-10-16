@@ -1,0 +1,61 @@
+# Runs on every push and pull request: type-check, lint, unit/API tests, production
+# build, then the browser smoke tests against the built app. A red run here means
+# don't deploy; Vercel builds from the same commit independently.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      COREPACK_ENABLE_DOWNLOAD_PROMPT: '0'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # Same Corepack as vercel.json, which runs the pnpm version pinned in package.json.
+      - name: Set up pnpm
+        run: |
+          npm install -g corepack@0.36.0
+          corepack enable pnpm
+          pnpm --version
+
+      - name: Cache the pnpm store
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/share/pnpm/store
+          key: pnpm-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: pnpm-${{ runner.os }}-
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Type-check, lint, unit and API tests
+        run: pnpm check
+
+      - name: Production build
+        run: pnpm build
+
+      - name: Install Chromium for the browser tests
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Browser smoke tests
+        run: pnpm exec playwright test
+
+      - name: Keep the browser test report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7

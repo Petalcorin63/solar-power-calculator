@@ -6,12 +6,13 @@ The rules this codebase follows, so it stays easy to pick up after time away.
 ## Before calling a change done
 
 ```sh
-pnpm check   # type-check (vue-tsc), lint (ESLint), all tests (Vitest)
-pnpm build   # production build
+pnpm check     # type-check (vue-tsc), lint (ESLint), all tests (Vitest)
+pnpm build     # production build
+pnpm test:e2e  # browser smoke tests (Playwright); needs Google Chrome installed
 ```
 
-Both must pass. For UI changes, also look at the page in a browser, in light and
-dark mode and at phone width. For server changes, run `pnpm dev:server` and try the
+All three must pass; CI runs the same on every push. For UI changes, also look at
+the page in a browser, in light and dark mode and at phone width. For server changes, run `pnpm dev:server` and try the
 flow, including one failure (wrong password, signed out, oversized save).
 
 Use **pnpm only**: no `npm install`, `npx` or `yarn`, and no other lockfiles. The
@@ -129,3 +130,8 @@ state comes from `useCalculator()`, not props passed down through every level.
   charging too", not "test 3".
 - Hash-heavy server tests are slow (scrypt is deliberately ~0.5 s); the Vitest
   timeout is raised in `vite.config.ts` for that reason.
+- Browser tests live in `e2e/` (Playwright) and cover what unit tests can't see:
+  tabs, the diagram drawing, sign-in. Import `test` from `e2e/fixtures.ts`, which
+  also fails a test if the page logs an error. Find elements the way a user would
+  (role, label, visible text), not by CSS class. A UI bug that only a browser shows
+  gets a test here.

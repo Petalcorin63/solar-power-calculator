@@ -132,7 +132,7 @@ picks it up automatically. Use pnpm only; don't add a `package-lock.json` or
 `yarn.lock`.
 
 ```sh
-npm install -g corepack@latest
+npm install -g corepack@0.36.0
 corepack enable pnpm
 ```
 
@@ -155,10 +155,19 @@ The calculator works without the server; only sign-in and saving need it.
 pnpm check   # type-check, lint and all tests — run before calling a change done
 pnpm test    # tests only
 pnpm lint    # ESLint only
+pnpm test:e2e  # build, then the browser smoke tests (Playwright) against the built app
 ```
 
 The type-check is strict (`noUncheckedIndexedAccess` among others), and ESLint runs
 typescript-eslint's strict, type-aware rules plus Vue's correctness rules.
+
+The browser tests (`e2e/`) start the production server on port 4173 with a throwaway
+database in `data/e2e/`, and drive it in your installed Google Chrome. They check the
+tabs, every diagram drawing (including that its boxes are colored), and sign-in.
+
+GitHub Actions ([.github/workflows/ci.yml](.github/workflows/ci.yml)) runs all of the
+above on every push and pull request. A red run means don't deploy: Vercel builds the
+same commit on its own and won't wait for CI.
 
 ## Deploying to Vercel
 
@@ -241,3 +250,14 @@ to come from the proxy. All visitors then share one sign-up limit, and anyone
 could lock an account out by failing its login 10 times. Don't set it when the
 server is exposed directly. A client could then fake `X-Forwarded-For` and get
 around the limits. Use `true` only if nothing but the proxy can reach the port.
+
+## License
+
+The code is released under the [MIT License](LICENSE).
+
+That covers this project's own code and text. The electrical-code figures in
+`src/lib/wiring/data/` (cable ratings and breaker sizes from NEC, PEC, IEC and
+AS/NZS) are drawn from standards owned by their publishers and are cited in the app.
+They are included for reference only. For an actual installation, use the current
+edition of the standard that applies where you live. As the [disclaimer](#disclaimer)
+says, the results are planning estimates, provided without warranty.

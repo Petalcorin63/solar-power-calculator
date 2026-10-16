@@ -153,6 +153,14 @@ The rest is in domain folders:
 The schema is created on startup (`CREATE TABLE IF NOT EXISTS`). There are no
 migrations yet; adding a column means adding one.
 
+## Tests and CI
+
+| Where | What | Run with |
+| --- | --- | --- |
+| `*.test.ts` beside the code | Calculations, parsing, the diagram's steps (Vitest), and the whole API through `app.inject` on an in-memory database | `pnpm test` (part of `pnpm check`) |
+| `e2e/*.spec.ts` | The built app in a real browser (Playwright): tabs, every diagram drawing, sign-in | `pnpm test:e2e` |
+| `.github/workflows/ci.yml` | All of the above plus the build, on every push and pull request | GitHub Actions |
+
 ## Where to change things
 
 | To… | Change |
